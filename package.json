@@ -1,0 +1,28 @@
+{
+  "name": "fs-fuse",
+  "version": "0.0.0",
+  "description": "Export any Node.js `fs`-like object as a FUSE filesystem",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/piranna/fs-fuse.git"
+  },
+  "keywords": [
+    "fs",
+    "filesystem",
+    "fuse"
+  ],
+  "author": "Jesús Leganés-Combarro 'piranna' <piranna@gmail.com>",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/piranna/fs-fuse/issues"
+  },
+  "homepage": "https://github.com/piranna/fs-fuse#readme",
+  "dependencies": {
+    "fuse-bindings": "^2.11.1",
+    "parse-mount-argv": "0.0.0"
+  }
+}
