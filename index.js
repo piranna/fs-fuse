@@ -1,4 +1,15 @@
-const errno = require('fuse-bindings').errno
+const fuse = require('fuse-bindings')
+
+const ENOSYS = fuse.ENOSYS
+const errno  = fuse.errno
+
+
+const direct_mapping = ['readdir', 'readlink', 'chown', 'chmod', 'open',
+                        'unlink', 'rename', 'link', 'symlink', 'mkdir', 'rmdir']
+
+const non_standard = ['init', 'access', 'statfs', 'flush', 'fsyncdir', 'mknod',
+                      'setxattr', 'getxattr', 'listxattr', 'removexattr',
+                      'opendir', 'releasedir', 'create', 'destroy']
 
 
 function fsCallback(error, ...args)
@@ -12,140 +23,116 @@ function FsFuse(fs)
   if(!(this instanceof FsFuse)) return new FsFuse(fs)
 
 
-  // access(path, mode, cb)
-  // statfs(path, cb)
-
-  this.getattr = function(path, cb)
+  function wrapFd(path, func, cb, ...args)
   {
-    fs.stat(path, fsCallback.bind(cb))
-  }
-
-  this.fgetattr = function(path, fd, cb)
-  {
-    fs.fstat(fd, fsCallback.bind(cb))
-  }
-
-  // flush(path, fd, cb)
-
-  this.fsync = function(path, fd, datasync, cb)
-  {
-    fs.fsync(fd, fsCallback.bind(cb))
-  }
-
-  // fsyncdir(path, fd, datasync, cb)
-
-  this.readdir = function(path, cb)
-  {
-    fs.readdir(path, fsCallback.bind(cb))
-  }
-
-  this.truncate = function(path, size, cb)
-  {
-    fs.truncate(path, size, fsCallback.bind(cb))
-  }
-
-  this.ftruncate = function(path, fd, size, cb)
-  {
-    fs.ftruncate(fd, size, fsCallback.bind(cb))
-  }
-
-  this.readlink = function(path, cb)
-  {
-    fs.readlink(path, fsCallback.bind(cb))
-  }
-
-  this.chown = function(path, uid, gid, cb)
-  {
-    fs.chown(path, uid, gid, fsCallback.bind(cb))
-  }
-
-  this.chmod = function(path, mode, cb)
-  {
-    fs.chmod(path, mode, fsCallback.bind(cb))
-  }
-
-  // mknod(path, mode, dev, cb)
-  // setxattr(path, name, buffer, length, offset, flags, cb)
-  // getxattr(path, name, buffer, length, offset, cb)
-  // listxattr(path, buffer, length, cb)
-  // removexattr(path, name, cb)
-
-  this.open = function(path, flags, cb)
-  {
-    fs.open(path, flags, fsCallback.bind(cb))
-  }
-
-  // opendir(path, flags, cb)
-
-  this.read = function(path, fd, buffer, length, position, cb)
-  {
-    fs.read(fd, buffer, 0, length, position, fsCallback.bind(cb))
-  }
-
-  this.write = function(path, fd, buffer, length, position, cb)
-  {
-    fs.write(fd, buffer, 0, length, position, fsCallback.bind(cb))
-  }
-
-  this.release = function(path, fd, cb)
-  {
-    fs.close(fd, fsCallback.bind(cb))
-  }
-
-  // releasedir(path, fd, cb)
-  // create(path, mode, cb)
-
-  this.utimens = function(path, atime, mtime, cb)
-  {
-    // Use higher precission `futimes` if available
-    if(!fs.futimes) return fs.utimes(path, atime/1000000000, mtime/1000000000,
-                                     fsCallback.bind(cb))
-
     fs.open(path, function(error, fd)
     {
       if(error) return cb(errno(error.code))
 
-      fs.futimes(fd, atime, mtime, function(err1)
+      func(fd, ...args, function(err1, ...results)
       {
         fs.close(fd, function(err2)
         {
-          fsCallback.bind(cb)(err1 || err2)
+          fsCallback.bind(cb)(err1 || err2, ...results)
         })
       })
     })
   }
 
-  this.unlink = function(path, cb)
+
+  //
+  // Methods without a direct mapping at the standard Node.js `fs`-like API, or
+  // that can have workarounds for missing or alternative ones (for example, by
+  // using file descriptors)
+  //
+
+  this.getattr = function(path, cb)
   {
-    fs.unlink(path, fsCallback.bind(cb))
+    if(fs. stat) return fs.stat(path, fsCallback.bind(cb))
+    if(fs.fstat) return wrapFd (path, fs.fstat, cb)
+
+    cb(ENOSYS)
   }
 
-  this.rename = function(src, dest, cb)
+  this.fgetattr = function(path, fd, cb)
   {
-    fs.rename(src, dest, fsCallback.bind(cb))
+    if(fs.fstat) return fs.fstat(fd  , fsCallback.bind(cb))
+    if(fs. stat) return fs. stat(path, fsCallback.bind(cb))
+
+    cb(ENOSYS)
   }
 
-  this.link = function(src, dest, cb)
+  this.fsync = function(path, fd, datasync, cb)
   {
-    fs.link(dest, src, fsCallback.bind(cb))
+    if(!fs.fsync) return cb(ENOSYS)
+
+    fs.fsync(fd, fsCallback.bind(cb))
   }
 
-  this.symlink = function(src, dest, cb)
+  this.truncate = function(path, size, cb)
   {
-    fs.write(dest, src, fsCallback.bind(cb))
+    if(fs.truncate ) return fs.truncate(path, size, fsCallback.bind(cb))
+    if(fs.ftruncate) return wrapFd     (path, fs.ftruncate, cb, size)
+
+    cb(ENOSYS)
   }
 
-  this.mkdir = function(path, mode, cb)
+  this.ftruncate = function(path, fd, size, cb)
   {
-    fs.mkdir(path, mode, fsCallback.bind(cb))
+    if(fs.ftruncate) return fs.ftruncate(fd  , size, fsCallback.bind(cb))
+    if(fs. truncate) return fs. truncate(path, size, fsCallback.bind(cb))
+
+    cb(ENOSYS)
   }
 
-  this.rmdir = function(path, cb)
+  this.read = function(path, fd, buffer, length, position, cb)
   {
-    fs.rmdir(path, fsCallback.bind(cb))
+    if(!fs.read) return cb(ENOSYS)
+
+    fs.read(fd, buffer, 0, length, position, fsCallback.bind(cb))
   }
 
-  // destroy(cb)
+  this.write = function(path, fd, buffer, length, position, cb)
+  {
+    if(!fs.write) return cb(ENOSYS)
+
+    fs.write(fd, buffer, 0, length, position, fsCallback.bind(cb))
+  }
+
+  this.release = function(path, fd, cb)
+  {
+    if(!fs.close) return cb(ENOSYS)
+
+    fs.close(fd, fsCallback.bind(cb))
+  }
+
+  this.utimens = function(path, atime, mtime, cb)
+  {
+    // Use higher precission `futimes` if available
+    if(fs.futimes) return wrapFd(path, fs.futimes, cb, atime, mtime)
+
+    if(!fs.utimes) return cb(ENOSYS)
+
+    fs.utimes(path, atime/1000000000, mtime/1000000000, fsCallback.bind(cb))
+  }
+
+
+  //
+  // FUSE methods that have a direct mapping with the Node.js `fs`-like API, and
+  // non-standard FUSE-only ones
+  //
+
+  direct_mapping.concat(non_standard).forEach(function(name)
+  {
+    let func = fs[name]
+    if(!func) return
+
+    this[name] = function(...args)
+    {
+      let cb = args.pop()
+      func(...args, fsCallback.bind(cb))
+    }
+  }, this)
 }
 
 
