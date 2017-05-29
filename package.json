@@ -1,6 +1,6 @@
 {
   "name": "fs-fuse",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "Export any Node.js `fs`-like object as a FUSE filesystem",
   "main": "index.js",
   "scripts": {
