@@ -1,4 +1,5 @@
-const fuse = require('fuse-bindings')
+const fuse      = require('fuse-bindings')
+const getStream = require('get-stream').buffer
 
 const ENOSYS = fuse.ENOSYS
 const errno  = fuse.errno
@@ -7,14 +8,39 @@ const errno  = fuse.errno
 const direct_mapping = ['readdir', 'readlink', 'chown', 'chmod', 'open',
                         'unlink', 'rename', 'link', 'symlink', 'mkdir', 'rmdir']
 
-const non_standard = ['init', 'access', 'statfs', 'flush', 'fsyncdir', 'mknod',
-                      'setxattr', 'getxattr', 'listxattr', 'removexattr',
-                      'opendir', 'releasedir', 'create', 'destroy']
+const non_standard = ['fuse_access', 'create', 'destroy', 'flush', 'fsyncdir',
+                      'getxattr', 'init', 'listxattr', 'mknod', 'opendir',
+                      'releasedir', 'removexattr', 'setxattr', 'statfs']
 
 
 function fsCallback(error, ...args)
 {
   this(error && errno(error.code), ...args)
+}
+
+/** Do the file truncation by writting at the new file size position
+ *
+ * Only valid for file size increases
+ */
+function truncate(createWriteStream, path, fd, size, cb)
+{
+  return function(error, stats)
+  {
+    if(error)
+    {
+      if(error.code !== 'ENOENT') return cb(error)
+
+      return createWriteStream(path, {fd, start: size})
+      .end('', cb)
+      .once('error', cb)
+    }
+
+    if(size < stats.size) return cb(ENOSYS)
+
+    createWriteStream(path, {fd, flags: 'r+', start: size})
+    .end('', cb)
+    .once('error', cb)
+  }
 }
 
 
@@ -33,7 +59,7 @@ function FsFuse(fs)
       {
         fs.close(fd, function(err2)
         {
-          fsCallback.bind(cb)(err1 || err2, ...results)
+          fsCallback.call(cb, err1 || err2, ...results)
         })
       })
     })
@@ -48,8 +74,9 @@ function FsFuse(fs)
 
   this.getattr = function(path, cb)
   {
-    if(fs. stat) return fs.stat(path, fsCallback.bind(cb))
-    if(fs.fstat) return wrapFd (path, fs.fstat, cb)
+    if(fs.lstat) return fs.lstat(path, fsCallback.bind(cb))
+    if(fs. stat) return fs. stat(path, fsCallback.bind(cb))
+    if(fs.fstat) return wrapFd  (path, fs.fstat, cb)
 
     cb(ENOSYS)
   }
@@ -57,6 +84,7 @@ function FsFuse(fs)
   this.fgetattr = function(path, fd, cb)
   {
     if(fs.fstat) return fs.fstat(fd  , fsCallback.bind(cb))
+    if(fs.lstat) return fs.lstat(path, fsCallback.bind(cb))
     if(fs. stat) return fs. stat(path, fsCallback.bind(cb))
 
     cb(ENOSYS)
@@ -74,7 +102,9 @@ function FsFuse(fs)
     if(fs.truncate ) return fs.truncate(path, size, fsCallback.bind(cb))
     if(fs.ftruncate) return wrapFd     (path, fs.ftruncate, cb, size)
 
-    cb(ENOSYS)
+    if(!fs.createWriteStream) return cb(ENOSYS)
+
+    this.getattr(path, truncate(fs.createWriteStream, path, null, size, cb))
   }
 
   this.ftruncate = function(path, fd, size, cb)
@@ -82,21 +112,46 @@ function FsFuse(fs)
     if(fs.ftruncate) return fs.ftruncate(fd  , size, fsCallback.bind(cb))
     if(fs. truncate) return fs. truncate(path, size, fsCallback.bind(cb))
 
-    cb(ENOSYS)
+    if(!fs.createWriteStream) return cb(ENOSYS)
+
+    this.fgetattr(path, fd, truncate(fs.createWriteStream, path, fd, size, cb))
   }
 
   this.read = function(path, fd, buffer, length, position, cb)
   {
-    if(!fs.read) return cb(ENOSYS)
+    if(fs.read)
+      return fs.read(fd, buffer, 0, length, position, fsCallback.bind(cb))
 
-    fs.read(fd, buffer, 0, length, position, fsCallback.bind(cb))
+    if(!fs.createReadStream) return cb(ENOSYS)
+
+    const options = {start: position, end: position+length}
+
+    getStream(fs.createReadStream(path, options), {maxBuffer: length})
+    .then(function(data)
+    {
+      data.copy(buffer)
+      cb(null, data.length)
+    }, cb)
   }
 
   this.write = function(path, fd, buffer, length, position, cb)
   {
-    if(!fs.write) return cb(ENOSYS)
+    if(fs.write)
+      return fs.write(fd, buffer, 0, length, position, fsCallback.bind(cb))
 
-    fs.write(fd, buffer, 0, length, position, fsCallback.bind(cb))
+    if(!fs.createWriteStream) return cb(ENOSYS)
+
+    const cbLength = cb.bind(null, null, buffer.length)
+    fs.createWriteStream(path, {flags: 'r+', start: position})
+    .end(buffer, cbLength)
+    .once('error', function(error)
+    {
+      if(!error || error.code !== 'ENOENT') return cb(error)
+
+      fs.createWriteStream(path, {start: position})
+      .end(buffer, cbLength)
+      .once('error', cb)
+    })
   }
 
   this.release = function(path, fd, cb)
