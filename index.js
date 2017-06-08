@@ -5,8 +5,8 @@ const ENOSYS = fuse.ENOSYS
 const errno  = fuse.errno
 
 
-const direct_mapping = ['readdir', 'readlink', 'chown', 'chmod', 'open',
-                        'unlink', 'rename', 'link', 'symlink', 'mkdir', 'rmdir']
+const direct_mapping = ['chmod', 'chown', 'link', 'mkdir', 'open', 'readdir',
+                        'readlink', 'rmdir', 'rename', 'symlink', 'unlink']
 
 const non_standard = ['fuse_access', 'create', 'destroy', 'flush', 'fsyncdir',
                       'getxattr', 'init', 'listxattr', 'mknod', 'opendir',
@@ -30,16 +30,19 @@ function truncate(createWriteStream, path, fd, size, cb)
     {
       if(error.code !== 'ENOENT') return cb(error)
 
+      // File don't exists, create it of the defined size
       return createWriteStream(path, {fd, start: size})
-      .end('', cb)
-      .once('error', cb)
+      .end('', fsCallback.bind(cb))
+      .once('error', fsCallback.bind(cb))
     }
 
+    // File truncation is not supported
     if(size < stats.size) return cb(ENOSYS)
 
+    // Expand file to desired size
     createWriteStream(path, {fd, flags: 'r+', start: size})
-    .end('', cb)
-    .once('error', cb)
+    .end('', fsCallback.bind(cb))
+    .once('error', fsCallback.bind(cb))
   }
 }
 
@@ -94,7 +97,9 @@ function FsFuse(fs)
   {
     if(!fs.fsync) return cb(ENOSYS)
 
-    fs.fsync(fd, fsCallback.bind(cb))
+    if(fd != null) return fs.fsync(fd, fsCallback.bind(cb))
+
+    wrapFd(path, fs.fsync, cb)
   }
 
   this.truncate = function(path, size, cb)
@@ -131,7 +136,7 @@ function FsFuse(fs)
     {
       data.copy(buffer)
       cb(null, data.length)
-    }, cb)
+    }, fsCallback.bind(cb))
   }
 
   this.write = function(path, fd, buffer, length, position, cb)
@@ -146,11 +151,11 @@ function FsFuse(fs)
     .end(buffer, cbLength)
     .once('error', function(error)
     {
-      if(!error || error.code !== 'ENOENT') return cb(error)
+      if(!error || error.code !== 'ENOENT') return cb(errno(error.code))
 
       fs.createWriteStream(path, {start: position})
       .end(buffer, cbLength)
-      .once('error', cb)
+      .once('error', fsCallback.bind(cb))
     })
   }
 
@@ -181,6 +186,8 @@ function FsFuse(fs)
   {
     let func = fs[name]
     if(!func) return
+
+    if(name.startWith('fuse_')) name = name.slice(5)
 
     this[name] = function(...args)
     {
