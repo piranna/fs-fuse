@@ -3,7 +3,7 @@ Export any Node.js `fs`-like object as a FUSE filesystem
 
 ## Node.js `fs` methods
 
-The following `fs` methods directly map to FUSE operations:
+The following `fs` methods' behavior directly maps to corresponding FUSE operations:
 
 `chmod`, `chown`, `fsync`, `ftruncate`, `link`, `mkdir`, `read`, `readdir`,
 `readlink`, `rename`, `rmdir`, `symlink`, `truncate`, `unlink`, `write`
