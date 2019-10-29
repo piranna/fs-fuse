@@ -135,7 +135,7 @@ function FsFuse(fs)
     .then(function(data)
     {
       data.copy(buffer)
-      cb(null, data.length)
+      cb(data.length)
     }, fsCallback.bind(cb))
   }
 
@@ -187,7 +187,7 @@ function FsFuse(fs)
     let func = fs[name]
     if(!func) return
 
-    if(name.startWith('fuse_')) name = name.slice(5)
+    if(name.startsWith('fuse_')) name = name.slice(5)
 
     this[name] = function(...args)
     {
