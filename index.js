@@ -135,6 +135,9 @@ function FsFuse(fs)
     .then(function(data)
     {
       data.copy(buffer)
+      // This should be `cb(null, data.length)`, but `fuse-bindings` don't
+      // provide a way to notify of errors. More info at
+      // https://github.com/mafintosh/fuse-bindings/issues/10
       cb(data.length)
     }, fsCallback.bind(cb))
   }
