@@ -1,7 +1,5 @@
 #!/usr/bin/env node
 
-const fs = require('fs')
-
 const fuse  = require('fuse-bindings')
 const parse = require('parse-mount-argv')
 
@@ -23,7 +21,16 @@ const path    = args.path
 const options = args.options
 
 if(dev && !options.dev) options.dev = dev
-if(options.fs) fs = require(options.fs)(options)
+
+let fs
+if(!options.fs)
+  fs = require('fs')
+else
+{
+  fs = require(options.fs)
+
+  if(fs instanceof Function) fs = new fs(options)
+}
 
 
 fuse.mount(path, FsFuse(fs), function(error)
