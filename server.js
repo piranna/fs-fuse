@@ -28,6 +28,7 @@ if(!options.fs)
 else
 {
   fs = require(options.fs)
+  delete options.fs
 
   if(fs instanceof Function) fs = new fs(options)
 }
